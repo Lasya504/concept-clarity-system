@@ -1,0 +1,392 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Concept Clarity</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+
+  <body>
+    <div class="outer-container">
+      <div class="card">
+        <h1 class="title">Concept Clarity</h1>
+
+        <!-- ── INPUT AREA (Tarun) ───────────────────────────────── -->
+        <div class="input-container">
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Enter scientific term..."
+            required
+          />
+
+          <div class="controls-row">
+            <div class="select-wrapper">
+              <select id="languageSelect">
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ru">Russian</option>
+                <option value="zh">Chinese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+              </select>
+            </div>
+
+            <button id="explainBtn" onclick="getExplanation()">Explain</button>
+            <button id="saveBtn" onclick="saveExplanation()">Save</button>
+          </div>
+        </div>
+
+        <!-- ── RESPONSE CARD (Tarun) ────────────────────────────── -->
+        <div id="explanationCard" class="response-box" style="display: none">
+          <h4 id="resultTitle"></h4>
+          <p id="resultText"></p>
+
+          <div id="exampleSection" class="example-section" style="display: none">
+            <h5 class="example-title">Real-Life Example</h5>
+            <p id="exampleText"></p>
+          </div>
+
+          <div id="relatedTerms" class="related-terms" style="display: none"></div>
+
+          <!-- ── RESOURCES + QUIZ (Tarun) ──────────────────────── -->
+          <div id="resourcesSection" class="resources-section" style="display: none">
+
+            <!-- Quiz Button -->
+            <div style="margin-top:15px;">
+              <button id="quizBtn" onclick="showQuiz()" class="quiz-btn">
+                🧠 Take Quick Quiz
+              </button>
+            </div>
+
+            <!-- Quiz Section -->
+            <div id="quizSection" style="display:none; margin-top:10px;">
+              <h5 class="quiz-title">Quick Quiz</h5>
+
+              <!-- Progress Bar -->
+              <div class="quiz-progress">
+                <div id="quizProgressBar"></div>
+              </div>
+
+              <p id="quizQuestion"></p>
+              <div id="quizOptions"></div>
+              <p id="quizResult" style="font-weight:bold;"></p>
+            </div>
+
+            <h5 class="resources-title">📚 Further Learning Resources</h5>
+            <div id="resourceLinks" class="resource-links"></div>
+          </div>
+
+          <!-- ── SEARCH HISTORY (Jousha) ───────────────────────── -->
+          <div id="historySection" class="history-bottom">
+            <div class="history-header">
+              <h4>Recent Searches</h4>
+              <button id="clearHistoryBtn" class="clear-history">Clear</button>
+            </div>
+            <ul id="historyList"></ul>
+          </div>
+        </div>
+
+        <!-- ── JSON OUTPUT (Tarun) ──────────────────────────────── -->
+        <div id="jsonSection" style="display: none">
+          <h4 style="margin-top: 20px">JSON Response:</h4>
+          <pre id="jsonOutput" class="json-box"></pre>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      /* ================================================================
+         TARUN – core explanation engine (unchanged)
+         ================================================================ */
+      let latestData = null;
+
+      async function getExplanation(termOverride = null) {
+        const searchInput     = document.getElementById("searchInput");
+        const languageSelect  = document.getElementById("languageSelect");
+        const term            = (termOverride ?? searchInput.value).trim();
+        const language        = languageSelect.value;
+
+        const explanationCard  = document.getElementById("explanationCard");
+        const jsonSection      = document.getElementById("jsonSection");
+        const resultTitle      = document.getElementById("resultTitle");
+        const resultText       = document.getElementById("resultText");
+        const exampleSection   = document.getElementById("exampleSection");
+        const exampleText      = document.getElementById("exampleText");
+        const jsonOutput       = document.getElementById("jsonOutput");
+        const relatedTerms     = document.getElementById("relatedTerms");
+        const resourcesSection = document.getElementById("resourcesSection");
+        const resourceLinks    = document.getElementById("resourceLinks");
+
+        /* ── Save to history whenever the user initiates a search ── */
+        if (termOverride === null && term) {
+          saveHistory(term, language);
+        }
+
+        if (!term) {
+          explanationCard.style.display  = "block";
+          jsonSection.style.display      = "none";
+          resultTitle.innerText          = "Input required";
+          resultText.innerText           = "Please enter a scientific term.";
+          exampleSection.style.display   = "none";
+          exampleText.innerText          = "";
+          relatedTerms.style.display     = "none";
+          relatedTerms.innerHTML         = "";
+          resourcesSection.style.display = "none";
+          resourceLinks.innerHTML        = "";
+          return;
+        }
+
+        try {
+          /* Loading state */
+          explanationCard.style.display  = "block";
+          jsonSection.style.display      = "none";
+          resultTitle.innerHTML =
+            '<div class="loading"></div><span class="loading-text">Analyzing concept...</span>';
+          resultText.innerText           = "Fetching explanation from multiple sources...";
+          exampleSection.style.display   = "none";
+          exampleText.innerText          = "";
+          relatedTerms.style.display     = "none";
+          relatedTerms.innerHTML         = "";
+          resourcesSection.style.display = "none";
+          resourceLinks.innerHTML        = "";
+
+          const response = await fetch("/api/explain", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ term: term, language: language }),
+          });
+
+          const data = await response.json();
+          latestData = data;
+
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to get explanation");
+          }
+
+          explanationCard.style.display = "block";
+          jsonSection.style.display     = "block";
+
+          searchInput.value      = data.term || term;
+          resultTitle.innerText  = data.term || term;
+          resultText.innerText   = data.explanation || "No explanation available.";
+
+          /* Real-life example */
+          if (data.real_life_example) {
+            exampleSection.style.display = "block";
+            const cleanedExample = String(data.real_life_example)
+              .replace(/^real[-\s]?life example:\s*/i, "")
+              .trim();
+            exampleText.innerText = cleanedExample || data.real_life_example;
+          } else {
+            exampleSection.style.display = "none";
+            exampleText.innerText        = "";
+          }
+
+          /* Related terms */
+          relatedTerms.innerHTML = "";
+          if (Array.isArray(data.related_terms) && data.related_terms.length > 0) {
+            data.related_terms.forEach((relatedTerm) => {
+              if (!relatedTerm) return;
+              const chip = document.createElement("button");
+              chip.type      = "button";
+              chip.className = "related-chip";
+              chip.innerText = relatedTerm;
+              chip.onclick   = () => getExplanation(relatedTerm);
+              relatedTerms.appendChild(chip);
+            });
+            relatedTerms.style.display = "flex";
+          } else {
+            relatedTerms.style.display = "none";
+          }
+
+          /* Further learning resources (Tarun) */
+          resourceLinks.innerHTML = "";
+          if (Array.isArray(data.resources) && data.resources.length > 0) {
+            data.resources.forEach(({ name, url, icon }) => {
+              const a = document.createElement("a");
+              a.href      = url;
+              a.target    = "_blank";
+              a.rel       = "noopener noreferrer";
+              a.className = "resource-link";
+              a.innerHTML = `<span>${icon}</span><span>${name}</span>`;
+              resourceLinks.appendChild(a);
+            });
+            resourcesSection.style.display = "block";
+          } else {
+            resourcesSection.style.display = "none";
+          }
+
+          jsonOutput.innerText = JSON.stringify(data, null, 2);
+
+        } catch (error) {
+          explanationCard.style.display  = "block";
+          jsonSection.style.display      = "none";
+          resultTitle.innerText          = "Error";
+          resultText.innerText           = error.message || "Unexpected error occurred.";
+          exampleSection.style.display   = "none";
+          exampleText.innerText          = "";
+          relatedTerms.style.display     = "none";
+          relatedTerms.innerHTML         = "";
+          resourcesSection.style.display = "none";
+          resourceLinks.innerHTML        = "";
+        }
+      }
+
+      /* Enter-key support */
+      document.getElementById("searchInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          getExplanation();
+        }
+      });
+
+      /* ================================================================
+         TARUN – Quiz (unchanged)
+         ================================================================ */
+      let currentQuestion = 0;
+      let score = 0;
+
+      function showQuiz() {
+        const quizSection  = document.getElementById("quizSection");
+        const quizQuestion = document.getElementById("quizQuestion");
+        const quizOptions  = document.getElementById("quizOptions");
+        const quizResult   = document.getElementById("quizResult");
+
+        quizSection.style.display = "block";
+
+        if (!latestData || !latestData.quiz) {
+          quizQuestion.innerText = "Quiz not available.";
+          return;
+        }
+
+        const questions = latestData.quiz.questions;
+
+        function loadQuestion() {
+          quizOptions.innerHTML = "";
+          quizResult.innerText  = "";
+
+          const q = questions[currentQuestion];
+
+          /* Progress bar */
+          document.getElementById("quizProgressBar").style.width =
+            ((currentQuestion) / questions.length) * 100 + "%";
+
+          quizQuestion.innerText = `Q${currentQuestion + 1}. ${q.question}`;
+
+          q.options.forEach((option) => {
+            const btn       = document.createElement("button");
+            btn.className   = "quiz-option";
+            btn.innerText   = option;
+
+            btn.onclick = () => {
+              const allButtons = quizOptions.querySelectorAll("button");
+              allButtons.forEach((b) => (b.disabled = true));
+
+              if (option === q.answer) {
+                score++;
+                btn.classList.add("correct");
+                quizResult.innerText    = "✅ Correct!";
+                quizResult.style.color  = "#10b981";
+              } else {
+                btn.classList.add("wrong");
+                allButtons.forEach((b) => {
+                  if (b.innerText === q.answer) b.classList.add("correct");
+                });
+                quizResult.innerText    = "❌ Wrong!";
+                quizResult.style.color  = "#ef4444";
+              }
+
+              setTimeout(() => {
+                currentQuestion++;
+                if (currentQuestion < questions.length) {
+                  loadQuestion();
+                } else {
+                  quizQuestion.innerText = "🎉 Quiz Completed";
+                  quizOptions.innerHTML  = "";
+                  quizResult.innerText   = `Your Score: ${score} / ${questions.length}`;
+                  document.getElementById("quizProgressBar").style.width = "100%";
+                }
+              }, 1200);
+            };
+
+            quizOptions.appendChild(btn);
+          });
+        }
+
+        currentQuestion = 0;
+        score           = 0;
+        loadQuestion();
+      }
+
+      /* ================================================================
+         JOUSHA – Search History (added, does not touch Tarun logic)
+         ================================================================ */
+
+      /**
+       * Persist a search term + timestamp to localStorage (max 10 entries).
+       * Called only on direct user searches (not on related-chip clicks).
+       */
+      function saveHistory(term, language) {
+        let history = JSON.parse(localStorage.getItem("cc_history")) || [];
+        const time  = new Date().toLocaleTimeString();
+
+        /* Avoid consecutive duplicate entries */
+        if (history.length > 0 && history[0].term === term) return;
+
+        history.unshift({ term: term, language: language || "en", time: time });
+        history = history.slice(0, 10);
+
+        localStorage.setItem("cc_history", JSON.stringify(history));
+        renderHistory();
+      }
+
+      /** Render history list into #historyList */
+      function renderHistory() {
+        const list = document.getElementById("historyList");
+        if (!list) return;
+
+        const history = JSON.parse(localStorage.getItem("cc_history")) || [];
+        list.innerHTML = "";
+
+        if (history.length === 0) {
+          const empty    = document.createElement("li");
+          empty.style.cursor = "default";
+          empty.style.color  = "#94a3b8";
+          empty.textContent  = "No recent searches yet.";
+          list.appendChild(empty);
+          return;
+        }
+
+        history.forEach((item) => {
+          const li = document.createElement("li");
+          li.innerHTML  = `<strong>${item.term}</strong> <span style="font-size:12px;color:#94a3b8;">(${item.time})</span>`;
+          li.onclick    = () => {
+            document.getElementById("searchInput").value = item.term;
+            /* Restore language if saved */
+            const langSelect = document.getElementById("languageSelect");
+            if (item.language) langSelect.value = item.language;
+            getExplanation();
+          };
+          list.appendChild(li);
+        });
+      }
+
+      /** Clear all history */
+      function clearHistory() {
+        localStorage.removeItem("cc_history");
+        renderHistory();
+      }
+
+      /* On page load: render history & wire up Clear button */
+      window.addEventListener("load", () => {
+        renderHistory();
+        const clearBtn = document.getElementById("clearHistoryBtn");
+        if (clearBtn) clearBtn.onclick = clearHistory;
+      });
+    </script>
+  </body>
+</html>
